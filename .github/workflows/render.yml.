@@ -1,0 +1,66 @@
+name: Render Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      frames:
+        description: "Opsional: tes sebagian saja, contoh 0-90. Kosongkan untuk render penuh."
+        required: false
+        default: ""
+
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Ekstrak proyek dari ZIP
+        run: |
+          unzip -q telescope_project.zip
+          ls telescope
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install library sistem untuk Chrome headless
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libgbm-dev \
+            libasound2t64 libxrandr2 libxkbcommon-dev libxfixes3 libxcomposite1 \
+            libxdamage1 libcups2 libpango-1.0-0 libcairo2
+
+      - name: Install dependencies
+        working-directory: telescope
+        run: npm install
+
+      - name: Render video (tanpa suara)
+        working-directory: telescope
+        env:
+          FRAMES: ${{ github.event.inputs.frames }}
+        run: |
+          mkdir -p out
+          EXTRA=""
+          if [ -n "$FRAMES" ]; then EXTRA="--frames=$FRAMES"; fi
+          npx remotion render src/index.jsx Story out/full_silent.mp4 \
+            --gl=swangle --concurrency=4 \
+            --image-format=jpeg --jpeg-quality=92 --crf=17 $EXTRA
+
+      - name: Gabungkan dengan voiceover
+        working-directory: telescope
+        run: |
+          npx remotion ffmpeg -y -hide_banner -loglevel error \
+            -i out/full_silent.mp4 -i voiceover.wav \
+            -map 0:v -map 1:a -c:v copy -c:a aac -b:a 192k -shortest final.mp4
+
+      - name: Upload hasil video
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-video
+          path: telescope/final.mp4
+          retention-days: 14
